@@ -23,8 +23,8 @@ const navigation = [
     ),
   },
   {
-    name: "Blog Posts",
-    href: "/dashboard/blog-posts",
+    name: "Blog Flow",
+    href: "/dashboard/blog-flow",
     icon: (
       <svg
         className="h-6 w-6"
