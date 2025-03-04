@@ -1,9 +1,9 @@
 import { OutlineGenerationParams } from "../types/generation";
 
+// Style guides for different content types
 const styleGuides = {
   academic: {
-    structure: "formal, research-based, with clear methodology",
-    tone: "scholarly, objective, analytical",
+    tone: "formal and research-based",
     sections: [
       "Abstract",
       "Introduction",
@@ -15,49 +15,39 @@ const styleGuides = {
     ],
   },
   conversational: {
-    structure: "flowing, engaging, with personal insights",
-    tone: "friendly, approachable, relatable",
-    sections: [
-      "Hook",
-      "Personal Story",
-      "Main Points",
-      "Examples",
-      "Takeaways",
-    ],
+    tone: "friendly and engaging",
+    sections: ["Hook", "Context", "Main Points", "Examples", "Takeaways"],
   },
   tutorial: {
-    structure: "step-by-step, with clear instructions",
-    tone: "clear, instructive, helpful",
+    tone: "instructional and step-by-step",
     sections: [
+      "Overview",
       "Prerequisites",
-      "Setup",
       "Steps",
       "Common Issues",
       "Next Steps",
     ],
   },
   listicle: {
-    structure: "numbered points with supporting details",
-    tone: "concise, scannable, engaging",
-    sections: ["Introduction", "Numbered Points", "Summary"],
+    tone: "concise and scannable",
+    sections: ["Introduction", "List Items", "Summary", "Resources"],
   },
 };
 
+// Keyword density and placement strategies
 const keywordStrategies = {
   aggressive: {
     density: "3-4%",
-    placement: "high frequency in titles, meta, first/last paragraphs",
-    variations: "extensive use of semantic keywords",
+    placement:
+      "Every 100-150 words, prioritizing headers and first/last paragraphs",
   },
   balanced: {
     density: "1.5-2.5%",
-    placement: "natural distribution with strategic positioning",
-    variations: "moderate use of semantic keywords",
+    placement: "Natural distribution with focus on headers and key paragraphs",
   },
   conservative: {
     density: "0.5-1.5%",
-    placement: "natural flow prioritized over keyword placement",
-    variations: "minimal semantic variations where natural",
+    placement: "Strategic placement in headers and topic sentences only",
   },
 };
 
@@ -69,76 +59,97 @@ export const generateOutlinePrompt = ({
   includeFAQ = true,
   keywordStrategy = "balanced",
 }: OutlineGenerationParams): string => {
-  const styleGuide = styleGuides[style];
-  const keywordGuide = keywordStrategies[keywordStrategy];
+  if (!selectedTopic) {
+    throw new Error("Selected topic is required");
+  }
 
-  // Extract competitor insights
+  const styleGuide = styleGuides[style] || styleGuides.conversational;
+  const keywordGuide =
+    keywordStrategies[keywordStrategy] || keywordStrategies.balanced;
+
+  // Ensure all required properties exist with defaults
   const {
-    commonHeadings,
-    commonTopics,
-    contentGaps,
-    keyInsights,
-    uniqueAngles,
-    recommendedWordCount,
-    averageWordCount,
-  } = selectedTopic.competitorInsights;
+    title = "",
+    description = "",
+    targetKeywords = [],
+    difficulty = "intermediate",
+    estimatedWordCount = 1500,
+    competitorInsights = {
+      recommendedWordCount: estimatedWordCount,
+      averageWordCount: estimatedWordCount,
+      keywordDensity: {},
+      averageHeadings: 0,
+      commonSubtopics: [],
+      keywordGaps: [],
+    },
+  } = selectedTopic;
 
-  return `As an expert content strategist, create a detailed outline for an article about "${
-    selectedTopic.title
-  }" that will outperform the current top-ranking content.
+  // Safely extract competitor insights with defaults
+  const {
+    recommendedWordCount = estimatedWordCount,
+    averageWordCount = estimatedWordCount,
+    commonSubtopics = [],
+    keywordGaps = [],
+  } = competitorInsights;
+
+  return `As an expert content strategist, create a detailed outline for an article about "${title}" that will outperform the current top-ranking content.
 
 Content Parameters:
-- Minimum word count: ${recommendedWordCount} (competitor average: ${averageWordCount})
+- Target word count: ${recommendedWordCount} (competitor average: ${averageWordCount})
 - Content style: ${style} (${styleGuide.tone})
 - Keyword strategy: ${keywordStrategy} (density: ${keywordGuide.density})
 - Maximum heading depth: h${depth}
 - Include introduction and conclusion: ${includeIntroConclusion}
 - Include FAQ section: ${includeFAQ}
 
-Competitor Analysis:
-1. Common Topics Found:
-${commonTopics.map((topic) => `   - ${topic}`).join("\n")}
+Topic Analysis:
+1. Main Topic: ${title}
+2. Description: ${description}
+3. Target Keywords: ${targetKeywords.join(", ")}
+4. Difficulty Level: ${difficulty}
 
-2. Content Gaps to Address:
-${contentGaps.map((gap) => `   - ${gap}`).join("\n")}
+${
+  commonSubtopics && commonSubtopics.length > 0
+    ? `\nCommon Subtopics to Cover:\n${commonSubtopics
+        .map((topic: string) => `- ${topic}`)
+        .join("\n")}`
+    : ""
+}
 
-3. Unique Angles to Include:
-${uniqueAngles.map((angle) => `   - ${angle}`).join("\n")}
-
-4. Key Insights to Cover:
-${keyInsights.map((insight) => `   - ${insight.topic}`).join("\n")}
-
-5. Common Headings Structure:
-${commonHeadings.map((heading) => `   - ${heading}`).join("\n")}
-
-Primary Keywords: ${selectedTopic.targetKeywords.join(", ")}
+${
+  keywordGaps && keywordGaps.length > 0
+    ? `\nContent Gaps to Address:\n${keywordGaps
+        .map((gap: string) => `- ${gap}`)
+        .join("\n")}`
+    : ""
+}
 
 Content Requirements:
 1. Each section must:
-   - Include SEO-optimized headings that outperform competitor titles
-   - Cover topics more comprehensively than competitors
+   - Include SEO-optimized headings
+   - Cover topics comprehensively
    - Address identified content gaps
-   - Include unique insights not found in competitor content
+   - Include unique insights
    - Maintain proper keyword density and placement
 
 2. Keyword Integration:
    - Primary keywords: ${keywordGuide.placement}
-   - Use semantic variations from competitor content
-   - Target content gaps: ${contentGaps.join(", ")}
+   - Use semantic variations
+   - Target identified gaps
 
 3. Structure Guidelines:
    - Follow enhanced ${style} format: ${styleGuide.sections.join(" → ")}
    - Ensure logical flow and comprehensive coverage
    - Include detailed transition suggestions
    ${
-     includeFAQ
-       ? "- End with expert FAQ section addressing common search queries"
-       : ""
+     includeFAQ ? "- End with expert FAQ section addressing common queries" : ""
    }
 
 IMPORTANT: Your response must be a valid JSON object with this EXACT structure:
 
 {
+  "title": "${title}",
+  "introduction": "Brief introduction to the topic",
   "sections": [
     {
       "id": "section-1",
@@ -156,67 +167,39 @@ IMPORTANT: Your response must be a valid JSON object with this EXACT structure:
         "secondary": ["supporting term", "related concept"],
         "semantic": ["variation", "synonym"]
       },
-      "children": [
-        {
-          "id": "section-1-1",
-          "title": "Detailed Analysis",
-          "type": "h2",
-          "content": "In-depth exploration of [subtopic]",
-          "keyPoints": ["Point 1", "Point 2"],
-          "recommendedWordCount": 500,
-          "keywords": {
-            "primary": ["subtopic keyword"],
-            "secondary": ["related term"],
-            "semantic": ["variant"]
-          },
-          "children": []
-        }
-      ]
+      "children": []
     }
   ],
+  "conclusion": "Summary of key points and takeaways",
   "metadata": {
-    "totalWordCount": 2500,
-    "keywordDensity": {
-      "main keyword": 2.5,
-      "supporting term": 1.8
-    },
-    "readabilityScore": 75,
-    "seoScore": 85
+    "estimatedWordCount": ${recommendedWordCount},
+    "targetKeywords": ${JSON.stringify(targetKeywords)}
   },
   "seoGuidance": {
     "keywordPlacements": {
-      "main keyword": {
+      "${targetKeywords[0] || "main-keyword"}": {
         "recommended": 8,
         "sections": ["section-1", "section-2"]
       }
     },
-    "contentGaps": [
-      "Missing aspect 1",
-      "Uncovered topic 2"
-    ],
+    "contentGaps": ${JSON.stringify(keywordGaps)},
     "competitorInsights": {
       "averageSectionCount": 8,
-      "commonHeadings": [
-        "Common Title 1",
-        "Common Title 2"
-      ],
-      "missingTopics": [
-        "Gap 1",
-        "Gap 2"
-      ]
+      "commonHeadings": ${JSON.stringify(commonSubtopics)},
+      "missingTopics": ${JSON.stringify(keywordGaps)}
     }
   }
 }
 
 Quality Checks:
-- Each section must be more detailed than competitor content
-- Word count must exceed competitor averages
-- Address ALL identified content gaps
-- Include unique insights not found in competitor content
+- Each section must be detailed and comprehensive
+- Word count must meet or exceed the target
+- Address all identified content gaps
+- Include unique insights
 - Maintain proper keyword distribution
 - Ensure all required fields are present and properly typed
 - Validate that all IDs are unique
-- Sections should add up to or exceed the recommended word count`;
+- Sections should add up to the target word count`;
 };
 
 export const generateOutlineCustomizationPrompt = (

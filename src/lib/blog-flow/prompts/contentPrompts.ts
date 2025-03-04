@@ -38,21 +38,38 @@ export const generateContentPrompt = ({
       "Use industry terminology, complex concepts, and detailed analysis",
   }[readabilityLevel];
 
-  const seoGuidance = outline.seoGuidance;
-  const keywordGuidance = Object.entries(seoGuidance.keywordPlacements)
-    .map(
-      ([keyword, data]) =>
-        `- "${keyword}": Use ${
-          data.recommended
-        } times, focus in sections: ${data.sections.join(", ")}`
-    )
-    .join("\n");
+  // Add default values for SEO guidance
+  const defaultSeoGuidance = {
+    keywordPlacements: {},
+    contentGaps: [],
+    competitorInsights: {
+      averageSectionCount: 5,
+      commonHeadings: [],
+      missingTopics: [],
+    },
+  };
 
+  const seoGuidance = outline.seoGuidance || defaultSeoGuidance;
+
+  // Safely handle keywordPlacements
+  const keywordGuidance = seoGuidance.keywordPlacements
+    ? Object.entries(seoGuidance.keywordPlacements)
+        .map(
+          ([keyword, data]) =>
+            `- "${keyword}": Use ${
+              data.recommended
+            } times, focus in sections: ${data.sections.join(", ")}`
+        )
+        .join("\n")
+    : "- Use keywords naturally throughout the content";
+
+  // Safely handle contentGaps
   const contentGapsGuidance = seoGuidance.contentGaps
-    .map((gap) => `- Address: ${gap}`)
-    .join("\n");
+    ? seoGuidance.contentGaps.map((gap) => `- Address: ${gap}`).join("\n")
+    : "- Cover all aspects of the topic comprehensively";
 
-  const competitorInsights = seoGuidance.competitorInsights;
+  const competitorInsights =
+    seoGuidance.competitorInsights || defaultSeoGuidance.competitorInsights;
 
   return `Generate high-quality blog content ${
     targetSection ? "for a specific section" : "following this outline"
@@ -63,8 +80,8 @@ ${
     ? `SECTION TO WRITE:
 Title: ${targetSection.title}
 Type: ${targetSection.type}
-Key Points: ${targetSection.keyPoints.join(", ")}
-Word Count Target: ${targetSection.recommendedWordCount}
+Key Points: ${targetSection.keyPoints?.join(", ") || ""}
+Word Count Target: ${targetSection.recommendedWordCount || "1000"}
 `
     : "Follow the complete outline structure provided below"
 }
@@ -85,9 +102,13 @@ Content Gaps to Address:
 ${contentGapsGuidance}
 
 Competitor Analysis:
-- Average Section Count: ${competitorInsights.averageSectionCount}
-- Common Headings: ${competitorInsights.commonHeadings.join(", ")}
-- Missing Topics: ${competitorInsights.missingTopics.join(", ")}
+- Average Section Count: ${competitorInsights.averageSectionCount || 5}
+- Common Headings: ${
+    (competitorInsights.commonHeadings || []).join(", ") || "N/A"
+  }
+- Missing Topics: ${
+    (competitorInsights.missingTopics || []).join(", ") || "N/A"
+  }
 
 REQUIREMENTS:
 1. Content Structure
@@ -119,41 +140,37 @@ Generate the content in this JSON structure:
   "sections": [
     {
       "id": "string",
+      "title": "string",
       "content": "string (markdown formatted)",
-      "wordCount": number,
-      "keywordDensity": {
-        "keyword": number
-      },
-      "readabilityScore": number
+      "metadata": {
+        "wordCount": number,
+        "readabilityScore": number,
+        "keywordDensity": { [keyword: string]: number }
+      }
     }
   ],
   "metadata": {
     "totalWordCount": number,
     "averageReadabilityScore": number,
-    "keywordDensityOverall": {
-      "keyword": number
-    },
+    "keywordDensityOverall": { [keyword: string]: number },
     "seoScore": number,
     "contentQualityMetrics": {
-      "comprehensiveness": number,
-      "engagement": number,
-      "clarity": number,
-      "expertise": number
+      "grammarScore": number,
+      "coherenceScore": number,
+      "engagementScore": number
     }
   },
   "seoAnalysis": {
     "keywordImplementation": {
-      "keyword": {
-        "actual": number,
-        "recommended": number,
-        "placement": ["string"]
-      }
+      "primary": { [keyword: string]: { "occurrences": number, "density": number } },
+      "secondary": [{ "keyword": string, "density": number, "occurrences": number }]
     },
-    "contentGapsCovered": ["string"],
-    "missingTopics": ["string"],
-    "suggestions": ["string"]
+    "contentGaps": string[],
+    "missingTopics": string[],
+    "improvementSuggestions": string[]
   }
-}`;
+}
+`;
 };
 
 export const generateSectionCustomizationPrompt = (

@@ -1,23 +1,53 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   BlogContentGenerationParams,
   BlogContentGenerationResponse,
   OutlineGenerationResponse,
 } from "../types/generation";
 
+const BLOG_CONTENT_STORAGE_KEY = "blog_content_state";
+
 export function useBlogContent() {
-  const [content, setContent] =
-    useState<BlogContentGenerationResponse["content"]>();
+  const [content, setContent] = useState<BlogContentGenerationResponse | null>(
+    null
+  );
   const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string>();
+  const [error, setError] = useState<string | null>(null);
+
+  // Load saved content on mount
+  useEffect(() => {
+    try {
+      const savedContent = localStorage.getItem(BLOG_CONTENT_STORAGE_KEY);
+      if (savedContent) {
+        const parsedContent = JSON.parse(savedContent);
+        // Ensure the saved content has the correct structure
+        if (parsedContent && parsedContent.sections) {
+          setContent(parsedContent);
+        }
+      }
+    } catch (err) {
+      console.error("Error loading saved content:", err);
+    }
+  }, []);
+
+  // Save content whenever it changes
+  useEffect(() => {
+    if (content) {
+      try {
+        localStorage.setItem(BLOG_CONTENT_STORAGE_KEY, JSON.stringify(content));
+      } catch (err) {
+        console.error("Error saving content:", err);
+      }
+    }
+  }, [content]);
 
   const generateContent = async (
-    outline: NonNullable<OutlineGenerationResponse["outline"]>,
+    outline: OutlineGenerationResponse,
     params?: Partial<Omit<BlogContentGenerationParams, "outline">>
   ) => {
     try {
       setIsLoading(true);
-      setError(undefined);
+      setError(null);
 
       const response = await fetch("/api/blog-flow/content", {
         method: "POST",
@@ -30,14 +60,14 @@ export function useBlogContent() {
         }),
       });
 
-      const data: BlogContentGenerationResponse = await response.json();
-
-      if (!data.success || !data.content) {
-        throw new Error(data.error || "Failed to generate blog content");
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || "Failed to generate blog content");
       }
 
-      setContent(data.content);
-      return data.content;
+      const data = await response.json();
+      setContent(data);
+      return data;
     } catch (err) {
       const message = err instanceof Error ? err.message : "An error occurred";
       setError(message);
@@ -47,10 +77,25 @@ export function useBlogContent() {
     }
   };
 
+  const updateContent = (newContent: BlogContentGenerationResponse) => {
+    setContent(newContent);
+  };
+
+  const clearSavedContent = () => {
+    try {
+      localStorage.removeItem(BLOG_CONTENT_STORAGE_KEY);
+      setContent(null);
+    } catch (err) {
+      console.error("Error clearing saved content:", err);
+    }
+  };
+
   return {
     content,
     isLoading,
     error,
     generateContent,
+    updateContent,
+    clearSavedContent,
   };
 }

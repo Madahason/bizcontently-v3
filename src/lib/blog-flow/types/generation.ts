@@ -6,21 +6,12 @@ export interface TopicIdea {
   difficulty: "beginner" | "intermediate" | "advanced";
   estimatedWordCount: number;
   competitorInsights: {
+    recommendedWordCount: number;
+    keywordDensity: { [keyword: string]: number };
+    averageHeadings: number;
     averageWordCount: number;
     commonSubtopics: string[];
     keywordGaps: string[];
-    topResults?: SerpResult[];
-    featuredSnippets?: string[];
-    relatedSearches?: string[];
-    commonHeadings: string[];
-    commonTopics: string[];
-    contentGaps: string[];
-    keyInsights: Array<{
-      topic: string;
-      frequency: number;
-    }>;
-    uniqueAngles: string[];
-    recommendedWordCount: number;
   };
   createdAt: Date;
 }
@@ -73,6 +64,10 @@ export interface OutlineSection {
     semantic: string[];
   };
   children: OutlineSection[];
+  metadata: {
+    wordCount: number;
+    readabilityScore: number;
+  };
 }
 
 export interface OutlineMetadata {
@@ -94,26 +89,28 @@ export interface OutlineGenerationParams {
 }
 
 export interface OutlineGenerationResponse {
-  success: boolean;
-  outline?: {
-    sections: OutlineSection[];
-    metadata: OutlineMetadata;
-    seoGuidance: {
-      keywordPlacements: {
-        [keyword: string]: {
-          recommended: number;
-          sections: string[];
-        };
-      };
-      contentGaps: string[];
-      competitorInsights: {
-        averageSectionCount: number;
-        commonHeadings: string[];
-        missingTopics: string[];
+  title: string;
+  introduction: string;
+  sections: OutlineSection[];
+  conclusion: string;
+  metadata: {
+    estimatedWordCount: number;
+    targetKeywords: string[];
+  };
+  seoGuidance: {
+    keywordPlacements: {
+      [keyword: string]: {
+        recommended: number;
+        sections: string[];
       };
     };
+    contentGaps: string[];
+    competitorInsights: {
+      averageSectionCount: number;
+      commonHeadings: string[];
+      missingTopics: string[];
+    };
   };
-  error?: string;
 }
 
 export interface OutlineCustomization {
@@ -125,7 +122,7 @@ export interface OutlineCustomization {
 }
 
 export interface BlogContentGenerationParams {
-  outline: NonNullable<OutlineGenerationResponse["outline"]>;
+  outline: OutlineGenerationResponse;
   section?: string; // Optional: Generate content for a specific section only
   style?: "formal" | "conversational" | "technical" | "storytelling";
   tone?: "professional" | "friendly" | "authoritative" | "educational";
@@ -135,44 +132,50 @@ export interface BlogContentGenerationParams {
 
 export interface BlogContentSection {
   id: string;
+  title: string;
   content: string;
-  wordCount: number;
-  keywordDensity: {
-    [keyword: string]: number;
+  metadata: {
+    wordCount: number;
+    readabilityScore: number;
+    keywordDensity: { [keyword: string]: number };
   };
-  readabilityScore: number;
+}
+
+export interface BlogContentMetadata {
+  totalWordCount: number;
+  averageReadabilityScore: number;
+  keywordDensityOverall: { [keyword: string]: number };
+  seoScore: number;
+  contentQualityMetrics: {
+    grammarScore: number;
+    coherenceScore: number;
+    engagementScore: number;
+  };
+}
+
+export interface KeywordImplementation {
+  occurrences: number;
+  density: number;
+}
+
+export interface SeoAnalysis {
+  keywordImplementation: {
+    primary: {
+      [keyword: string]: KeywordImplementation;
+    };
+    secondary: Array<{
+      keyword: string;
+      density: number;
+      occurrences: number;
+    }>;
+  };
+  contentGaps: string[];
+  missingTopics: string[];
+  improvementSuggestions: string[];
 }
 
 export interface BlogContentGenerationResponse {
-  success: boolean;
-  content?: {
-    sections: BlogContentSection[];
-    metadata: {
-      totalWordCount: number;
-      averageReadabilityScore: number;
-      keywordDensityOverall: {
-        [keyword: string]: number;
-      };
-      seoScore: number;
-      contentQualityMetrics: {
-        comprehensiveness: number;
-        engagement: number;
-        clarity: number;
-        expertise: number;
-      };
-    };
-    seoAnalysis: {
-      keywordImplementation: {
-        [keyword: string]: {
-          actual: number;
-          recommended: number;
-          placement: string[];
-        };
-      };
-      contentGapsCovered: string[];
-      missingTopics: string[];
-      suggestions: string[];
-    };
-  };
-  error?: string;
+  sections: BlogContentSection[];
+  metadata: BlogContentMetadata;
+  seoAnalysis: SeoAnalysis;
 }

@@ -167,221 +167,91 @@ export async function POST(req: Request) {
   try {
     const params: OutlineGenerationParams = await req.json();
 
+    // Validate input parameters
     if (!params.selectedTopic) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: "Selected topic is required",
-        },
-        { status: 400 }
-      );
+      throw new Error("No topic selected");
     }
 
+    const prompt = generateOutlinePrompt(params);
+
+    const response = await anthropic.messages.create({
+      model: "claude-3-opus-20240229",
+      max_tokens: 4000,
+      temperature: 0.7,
+      messages: [
+        {
+          role: "user",
+          content: prompt,
+        },
+      ],
+    });
+
+    // Extract the content from the first message block
+    const content = response.content.find(
+      (block) => block.type === "text"
+    )?.text;
+
+    if (!content) {
+      throw new Error("No content received from Anthropic");
+    }
+
+    // Try to parse the content as JSON, removing any potential non-JSON text
+    const jsonContent = content.substring(
+      content.indexOf("{"),
+      content.lastIndexOf("}") + 1
+    );
+
+    let parsedOutline: OutlineGenerationResponse;
     try {
-      // First, analyze SERP data for the topic
-      console.log("Analyzing SERP data for:", params.selectedTopic.title);
-      let serpAnalysis;
-      try {
-        serpAnalysis = await analyzeSerpContent(params.selectedTopic.title);
-      } catch (serpError) {
-        console.error("SERP analysis error:", serpError);
-        // Continue with default values if SERP analysis fails
-        serpAnalysis = {
-          mainHeadings: [],
-          subHeadings: [],
-          commonTopics: [],
-          wordCounts: {
-            average: params.selectedTopic.estimatedWordCount,
-            highest: params.selectedTopic.estimatedWordCount,
-            recommended: params.selectedTopic.estimatedWordCount * 1.2,
-          },
-          keyInsights: [],
-          uniqueAngles: [],
-          contentGaps: [],
-        };
-      }
-
-      const competitorInsights = generateCompetitorInsights(serpAnalysis);
-
-      // Update the topic with SERP insights
-      const enhancedTopic = {
-        ...params.selectedTopic,
-        estimatedWordCount: Math.max(
-          params.selectedTopic.estimatedWordCount,
-          competitorInsights.recommendedWordCount
-        ),
-        competitorInsights: {
-          ...params.selectedTopic.competitorInsights,
-          ...competitorInsights,
-        },
-      };
-
-      // Generate the prompt using enhanced topic data
-      const prompt = generateOutlinePrompt({
-        ...params,
-        selectedTopic: enhancedTopic,
-      });
-
-      // Log the parameters being sent to Anthropic
-      console.log("Sending request to Anthropic with topic:", {
-        title: enhancedTopic.title,
-        wordCount: enhancedTopic.estimatedWordCount,
-        insights: {
-          commonTopics: competitorInsights.commonTopics.length,
-          contentGaps: competitorInsights.contentGaps.length,
-          uniqueAngles: competitorInsights.uniqueAngles.length,
-        },
-      });
-
-      // Create the completion
-      const response = await anthropic.messages.create({
-        model: "claude-3-opus-20240229",
-        max_tokens: 4000,
-        temperature: 0.7,
-        system: `You are an expert content strategist and SEO specialist.
-You must ONLY respond with a valid JSON object.
-Do not include any other text, explanations, or markdown formatting.
-The JSON structure must exactly match the example provided.
-Each field must have the correct type as specified.
-Never include any text before or after the JSON object.
-Create an outline that is more comprehensive than the analyzed competitors:
-- Cover all topics found in competitor content
-- Address identified content gaps
-- Include unique angles not covered by competitors
-- Aim for higher word count and depth
-- Ensure proper keyword placement and density`,
-        messages: [
-          {
-            role: "user",
-            content: prompt,
-          },
-        ],
-      });
-
-      // Get the content from the response
-      const content = response.content.find((block) => block.type === "text");
-      if (!content || content.type !== "text") {
-        throw new Error("No text content in response");
-      }
-
-      try {
-        // Clean up the response text
-        const cleanedText = sanitizeResponse(content.text);
-        console.log(
-          "Cleaned response text:",
-          cleanedText.substring(0, 200) + "..."
-        );
-
-        // Try to parse the cleaned JSON
-        let parsed;
-        try {
-          parsed = JSON.parse(cleanedText);
-        } catch (initialParseError) {
-          console.error("Initial parse error:", initialParseError);
-          // If initial parse fails, try to fix common JSON issues
-          const fixedText = cleanedText
-            .replace(/,(\s*[}\]])/g, "$1")
-            .replace(/'/g, '"')
-            .replace(/\n/g, " ")
-            .trim();
-          parsed = JSON.parse(fixedText);
-        }
-
-        // Validate the parsed response
-        const validation = validateOutline(parsed);
-
-        if (!validation.isValid) {
-          console.error("Outline validation errors:", validation.errors);
-          return NextResponse.json(
-            {
-              success: false,
-              error: "Invalid outline structure",
-              validationErrors: validation.errors,
-              receivedStructure: parsed,
-              debug: {
-                serpAnalysisStatus: serpAnalysis ? "success" : "failed",
-                topicTitle: params.selectedTopic.title,
-                enhancedWordCount: enhancedTopic.estimatedWordCount,
-                competitorInsightsAvailable:
-                  Object.keys(competitorInsights).length > 0,
-              },
-            },
-            { status: 422 }
-          );
-        }
-
-        // Add SERP analysis data to the response
-        const outlineWithAnalysis = {
-          ...parsed,
-          serpAnalysis: {
-            analyzedResults: serpAnalysis.mainHeadings.length,
-            averageCompetitorWordCount: serpAnalysis.wordCounts.average,
-            recommendedWordCount: serpAnalysis.wordCounts.recommended,
-            uniqueAngles: serpAnalysis.uniqueAngles,
-            contentGaps: serpAnalysis.contentGaps,
-          },
-        };
-
-        // Return the validated outline with SERP analysis
-        return NextResponse.json({
-          success: true,
-          outline: outlineWithAnalysis,
-        });
-      } catch (parseError) {
-        console.error("Failed to parse outline:", parseError);
-        return NextResponse.json(
-          {
-            success: false,
-            error: "Failed to parse outline response",
-            parseError:
-              parseError instanceof Error
-                ? parseError.message
-                : "Unknown error",
-            receivedText: content.text.substring(0, 500) + "...",
-            cleanedText:
-              sanitizeResponse(content.text).substring(0, 500) + "...",
-            debug: {
-              serpAnalysisStatus: serpAnalysis ? "success" : "failed",
-              topicTitle: params.selectedTopic.title,
-              enhancedWordCount: enhancedTopic.estimatedWordCount,
-              competitorInsightsAvailable:
-                Object.keys(competitorInsights).length > 0,
-            },
-          },
-          { status: 422 }
-        );
-      }
-    } catch (error) {
-      console.error("SERP analysis or outline generation error:", error);
-      return NextResponse.json(
-        {
-          success: false,
-          error: "Error analyzing search results or generating outline",
-          details: error instanceof Error ? error.message : "Unknown error",
-          debug: {
-            stage: "outline_generation",
-            topicTitle: params.selectedTopic.title,
-            errorType: error instanceof Error ? error.name : typeof error,
-            errorStack: error instanceof Error ? error.stack : undefined,
-          },
-        },
-        { status: 500 }
-      );
+      parsedOutline = JSON.parse(jsonContent);
+    } catch (parseError) {
+      console.error("Failed to parse outline as JSON:", parseError);
+      console.error("Raw content:", content);
+      throw new Error("Invalid JSON response from Anthropic");
     }
-  } catch (error) {
-    console.error("Request processing error:", error);
-    return NextResponse.json(
-      {
-        success: false,
-        error: "Failed to process outline generation request",
-        requestError: error instanceof Error ? error.message : "Unknown error",
-        debug: {
-          stage: "request_processing",
-          errorType: error instanceof Error ? error.name : typeof error,
-          errorStack: error instanceof Error ? error.stack : undefined,
-        },
+
+    // Validate the parsed outline has the required structure
+    if (!parsedOutline.sections || !Array.isArray(parsedOutline.sections)) {
+      console.error("Invalid outline structure:", parsedOutline);
+      throw new Error("Invalid outline structure: missing sections array");
+    }
+
+    // Add IDs to sections if they don't exist
+    const addIds = (sections: any[]): any[] => {
+      return sections.map((section) => ({
+        ...section,
+        id: section.id || crypto.randomUUID(),
+        children: section.children ? addIds(section.children) : [],
+      }));
+    };
+
+    parsedOutline.sections = addIds(parsedOutline.sections);
+
+    return new NextResponse(JSON.stringify(parsedOutline), {
+      headers: {
+        "Content-Type": "application/json",
       },
-      { status: 500 }
+    });
+  } catch (error) {
+    console.error("[OUTLINE_ERROR]", error);
+    // Include more detailed error information in development
+    const errorMessage =
+      process.env.NODE_ENV === "development"
+        ? error instanceof Error
+          ? `${error.message}\n${error.stack}`
+          : "Failed to generate outline"
+        : "Failed to generate outline";
+
+    return new NextResponse(
+      JSON.stringify({
+        error: errorMessage,
+      }),
+      {
+        status: 500,
+        headers: {
+          "Content-Type": "application/json",
+        },
+      }
     );
   }
 }

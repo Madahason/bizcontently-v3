@@ -1,310 +1,323 @@
-import { BlogContentGenerationResponse } from "@/lib/blog-flow/types/generation";
+import {
+  BlogContentGenerationResponse,
+  BlogContentSection,
+  KeywordImplementation,
+} from "@/lib/blog-flow/types/generation";
 import { useState } from "react";
 import ReactMarkdown from "react-markdown";
+import {
+  findRelevantLinks,
+  insertLinks,
+} from "@/lib/blog-flow/utils/textAnalysis";
 
-interface BlogContentProps {
-  content: NonNullable<BlogContentGenerationResponse["content"]>;
+interface KeywordData {
+  occurrences: number;
+  density: number;
 }
 
-export function BlogContent({ content }: BlogContentProps) {
-  const [showMetadata, setShowMetadata] = useState(false);
-  const [showSEOAnalysis, setShowSEOAnalysis] = useState(false);
+interface BlogContentProps {
+  content: BlogContentGenerationResponse;
+  targetWordCount?: number;
+  onElaborate?: (sectionId: string) => Promise<string>;
+}
 
-  const totalWordCount = content.sections.reduce(
-    (total, section) => total + section.wordCount,
+export default function BlogContent({
+  content,
+  targetWordCount,
+  onElaborate,
+}: BlogContentProps) {
+  const [showMetrics, setShowMetrics] = useState(false);
+  const [showSEO, setShowSEO] = useState(false);
+  const [elaboratingSections, setElaboratingSections] = useState<string[]>([]);
+  const [sections, setSections] = useState<BlogContentSection[]>(
+    content.sections
+  );
+
+  const totalWordCount = sections.reduce(
+    (total, section) => total + section.metadata.wordCount,
     0
   );
-  const averageReadability =
-    content.sections.reduce(
-      (total, section) => total + section.readabilityScore,
-      0
-    ) / content.sections.length;
+
+  const handleElaborate = async (sectionId: string) => {
+    if (!onElaborate || elaboratingSections.includes(sectionId)) return;
+
+    try {
+      setElaboratingSections((prev) => [...prev, sectionId]);
+
+      // Find the section to elaborate
+      const sectionIndex = sections.findIndex((s) => s.id === sectionId);
+      if (sectionIndex === -1) return;
+
+      // Get elaborated content
+      const elaboratedContent = await onElaborate(sectionId);
+
+      // Update the section with elaborated content
+      const updatedSections = [...sections];
+      updatedSections[sectionIndex] = {
+        ...sections[sectionIndex],
+        content: elaboratedContent,
+        metadata: {
+          ...sections[sectionIndex].metadata,
+          wordCount: elaboratedContent.split(/\s+/).length,
+        },
+      };
+
+      setSections(updatedSections);
+    } catch (error) {
+      console.error("Error elaborating section:", error);
+    } finally {
+      setElaboratingSections((prev) => prev.filter((id) => id !== sectionId));
+    }
+  };
+
+  const getWordCountColor = (count: number) => {
+    if (!targetWordCount) return "text-gray-600";
+    const percentage = (count / targetWordCount) * 100;
+    if (percentage >= 90 && percentage <= 110) return "text-green-600";
+    if (percentage >= 75 && percentage <= 125) return "text-yellow-600";
+    return "text-red-600";
+  };
+
+  const getProgressBarColor = (count: number) => {
+    if (!targetWordCount) return "bg-gray-600";
+    const percentage = (count / targetWordCount) * 100;
+    if (percentage >= 90 && percentage <= 110) return "bg-green-600";
+    if (percentage >= 75 && percentage <= 125) return "bg-yellow-600";
+    return "bg-red-600";
+  };
+
+  const getWordCountStatus = () => {
+    if (!targetWordCount) return "";
+    const difference = totalWordCount - targetWordCount;
+    if (Math.abs(difference) <= targetWordCount * 0.1) return "on target";
+    return difference > 0
+      ? `${difference.toLocaleString()} words over target`
+      : `${Math.abs(difference).toLocaleString()} words under target`;
+  };
 
   return (
     <div className="space-y-8">
-      {/* Blog Content Sections */}
-      <div className="prose prose-purple prose-lg max-w-none">
-        {content.sections.map((section) => (
+      {/* Blog Title */}
+      <h1 className="text-4xl font-bold text-gray-900 mb-8">
+        {sections[0]?.title}
+      </h1>
+
+      {/* Blog Content */}
+      <article className="prose prose-lg max-w-none markdown-content">
+        {sections.map((section, index) => (
           <div key={section.id} className="mb-12">
-            <div className="markdown-content prose-lg max-w-none">
-              <ReactMarkdown>{section.content}</ReactMarkdown>
-            </div>
-            <div className="mt-4 text-sm text-gray-500">
-              Word count: {section.wordCount.toLocaleString()} | Readability
-              score: {section.readabilityScore}
-            </div>
+            {/* Section Content */}
+            <ReactMarkdown>{section.content}</ReactMarkdown>
+
+            {/* Elaborate Button */}
+            {onElaborate && (
+              <div className="mt-4">
+                <button
+                  onClick={() => handleElaborate(section.id)}
+                  disabled={elaboratingSections.includes(section.id)}
+                  className="inline-flex items-center px-3 py-2 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-purple-500 disabled:bg-gray-100 disabled:cursor-not-allowed"
+                >
+                  {elaboratingSections.includes(section.id) ? (
+                    <>
+                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-purple-600 mr-2"></div>
+                      Elaborating...
+                    </>
+                  ) : (
+                    "Elaborate This Section"
+                  )}
+                </button>
+              </div>
+            )}
           </div>
         ))}
+      </article>
 
-        {/* Word Count Summary */}
-        <div className="mt-8 pt-8 border-t border-gray-200">
-          <div className="flex items-center justify-between text-sm text-gray-500">
-            <span>
-              Total Word Count: {totalWordCount.toLocaleString()} words
-            </span>
-            <span>
-              Average Readability Score: {averageReadability.toFixed(1)}
-            </span>
-          </div>
-        </div>
-      </div>
-
-      {/* Content Metadata */}
+      {/* Word Count and Metrics */}
       <div className="border-t border-gray-200 pt-6">
-        <button
-          onClick={() => setShowMetadata(!showMetadata)}
-          className="flex items-center justify-between w-full text-left"
-        >
-          <h3 className="text-lg font-medium text-gray-900">Content Metrics</h3>
-          <span className="ml-6 flex items-center">
-            {showMetadata ? (
-              <svg
-                className="h-5 w-5 text-gray-400"
-                viewBox="0 0 20 20"
-                fill="currentColor"
+        <div className="space-y-4">
+          {/* Word Count Progress */}
+          <div>
+            <div className="flex justify-between items-center mb-2">
+              <h3 className="text-sm font-medium text-gray-900">Word Count</h3>
+              <span
+                className={`text-sm font-medium ${getWordCountColor(
+                  totalWordCount
+                )}`}
               >
-                <path
-                  fillRule="evenodd"
-                  d="M14.707 12.707a1 1 0 01-1.414 0L10 9.414l-3.293 3.293a1 1 0 01-1.414-1.414l4-4a1 1 0 011.414 0l4 4a1 1 0 010 1.414z"
-                  clipRule="evenodd"
-                />
-              </svg>
-            ) : (
-              <svg
-                className="h-5 w-5 text-gray-400"
-                viewBox="0 0 20 20"
-                fill="currentColor"
-              >
-                <path
-                  fillRule="evenodd"
-                  d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z"
-                  clipRule="evenodd"
-                />
-              </svg>
+                {totalWordCount.toLocaleString()} /{" "}
+                {targetWordCount?.toLocaleString() || "N/A"} words
+              </span>
+            </div>
+            {targetWordCount && (
+              <>
+                <div className="relative w-full h-2 bg-gray-200 rounded-full overflow-hidden">
+                  <div
+                    className={`absolute left-0 top-0 h-full transition-all duration-300 ${getProgressBarColor(
+                      totalWordCount
+                    )}`}
+                    style={{
+                      width: `${Math.min(
+                        (totalWordCount / targetWordCount) * 100,
+                        100
+                      )}%`,
+                    }}
+                  ></div>
+                </div>
+                <p className="mt-1 text-sm text-gray-500">
+                  {getWordCountStatus()}
+                </p>
+              </>
             )}
-          </span>
-        </button>
-        {showMetadata && (
-          <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            <div className="bg-purple-50 rounded-lg p-4">
-              <h4 className="text-sm font-medium text-purple-800">
-                Total Words
-              </h4>
-              <p className="mt-2 text-2xl font-semibold text-purple-900">
-                {totalWordCount}
-              </p>
-            </div>
-            <div className="bg-purple-50 rounded-lg p-4">
-              <h4 className="text-sm font-medium text-purple-800">
-                Readability Score
-              </h4>
-              <p className="mt-2 text-2xl font-semibold text-purple-900">
-                {averageReadability.toFixed(1)}
-              </p>
-            </div>
-            <div className="bg-purple-50 rounded-lg p-4">
-              <h4 className="text-sm font-medium text-purple-800">SEO Score</h4>
-              <p className="mt-2 text-2xl font-semibold text-purple-900">
-                {content.metadata.seoScore}%
-              </p>
-            </div>
-            <div className="bg-purple-50 rounded-lg p-4">
-              <h4 className="text-sm font-medium text-purple-800">
-                Content Quality
-              </h4>
-              <div className="mt-2 space-y-1">
-                {Object.entries(content.metadata.contentQualityMetrics).map(
-                  ([key, value]) => (
-                    <div
-                      key={key}
-                      className="flex items-center justify-between text-sm"
-                    >
-                      <span className="capitalize text-purple-700">{key}:</span>
-                      <span className="font-medium text-purple-900">
-                        {Math.round(value * 100)}%
-                      </span>
+          </div>
+
+          {/* Content Metrics */}
+          <div>
+            <button
+              onClick={() => setShowMetrics(!showMetrics)}
+              className="flex items-center text-sm font-medium text-gray-900 hover:text-gray-700"
+            >
+              <svg
+                className={`mr-2 h-5 w-5 transform transition-transform ${
+                  showMetrics ? "rotate-90" : ""
+                }`}
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M9 5l7 7-7 7"
+                />
+              </svg>
+              Content Metrics
+            </button>
+            {showMetrics && (
+              <div className="mt-2 pl-7 space-y-4">
+                <div>
+                  <h4 className="text-sm font-medium mb-1">Quality Scores</h4>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <p className="text-sm text-gray-500">Grammar</p>
+                      <p className="text-sm font-medium">
+                        {content.metadata.contentQualityMetrics.grammarScore}/10
+                      </p>
                     </div>
-                  )
+                    <div>
+                      <p className="text-sm text-gray-500">Coherence</p>
+                      <p className="text-sm font-medium">
+                        {content.metadata.contentQualityMetrics.coherenceScore}
+                        /10
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-sm text-gray-500">Engagement</p>
+                      <p className="text-sm font-medium">
+                        {content.metadata.contentQualityMetrics.engagementScore}
+                        /10
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* SEO Analysis */}
+          <div>
+            <button
+              onClick={() => setShowSEO(!showSEO)}
+              className="flex items-center text-sm font-medium text-gray-900 hover:text-gray-700"
+            >
+              <svg
+                className={`mr-2 h-5 w-5 transform transition-transform ${
+                  showSEO ? "rotate-90" : ""
+                }`}
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M9 5l7 7-7 7"
+                />
+              </svg>
+              SEO Analysis
+            </button>
+            {showSEO && (
+              <div className="mt-2 pl-7 space-y-4">
+                <div>
+                  <h4 className="text-sm font-medium mb-1">
+                    Overall SEO Score
+                  </h4>
+                  <p className="text-sm">{content.metadata.seoScore}/100</p>
+                </div>
+
+                {/* Keyword Implementation */}
+                <div>
+                  <h4 className="text-sm font-medium mb-1">
+                    Keyword Implementation
+                  </h4>
+                  <div className="space-y-2">
+                    {Object.entries(
+                      content.seoAnalysis.keywordImplementation.primary
+                    ).map(([keyword, data]) => (
+                      <div key={keyword} className="flex justify-between">
+                        <span className="text-sm text-gray-500">{keyword}</span>
+                        <span className="text-sm">
+                          {data.occurrences} times ({data.density.toFixed(2)}%)
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Content Gaps */}
+                {content.seoAnalysis.contentGaps.length > 0 && (
+                  <div>
+                    <h4 className="text-sm font-medium mb-1">Content Gaps</h4>
+                    <ul className="list-disc list-inside text-sm text-gray-500">
+                      {content.seoAnalysis.contentGaps.map((gap, index) => (
+                        <li key={index}>{gap}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                {/* Missing Topics */}
+                {content.seoAnalysis.missingTopics.length > 0 && (
+                  <div>
+                    <h4 className="text-sm font-medium mb-1">Missing Topics</h4>
+                    <ul className="list-disc list-inside text-sm text-gray-500">
+                      {content.seoAnalysis.missingTopics.map((topic, index) => (
+                        <li key={index}>{topic}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                {/* Improvement Suggestions */}
+                {content.seoAnalysis.improvementSuggestions.length > 0 && (
+                  <div>
+                    <h4 className="text-sm font-medium mb-1">
+                      Improvement Suggestions
+                    </h4>
+                    <ul className="list-disc list-inside text-sm text-gray-500">
+                      {content.seoAnalysis.improvementSuggestions.map(
+                        (suggestion, index) => (
+                          <li key={index}>{suggestion}</li>
+                        )
+                      )}
+                    </ul>
+                  </div>
                 )}
               </div>
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* SEO Analysis */}
-      <div className="border-t border-gray-200 pt-6">
-        <button
-          onClick={() => setShowSEOAnalysis(!showSEOAnalysis)}
-          className="flex items-center justify-between w-full text-left"
-        >
-          <h3 className="text-lg font-medium text-gray-900">SEO Analysis</h3>
-          <span className="ml-6 flex items-center">
-            {showSEOAnalysis ? (
-              <svg
-                className="h-5 w-5 text-gray-400"
-                viewBox="0 0 20 20"
-                fill="currentColor"
-              >
-                <path
-                  fillRule="evenodd"
-                  d="M14.707 12.707a1 1 0 01-1.414 0L10 9.414l-3.293 3.293a1 1 0 01-1.414-1.414l4-4a1 1 0 011.414 0l4 4a1 1 0 010 1.414z"
-                  clipRule="evenodd"
-                />
-              </svg>
-            ) : (
-              <svg
-                className="h-5 w-5 text-gray-400"
-                viewBox="0 0 20 20"
-                fill="currentColor"
-              >
-                <path
-                  fillRule="evenodd"
-                  d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z"
-                  clipRule="evenodd"
-                />
-              </svg>
-            )}
-          </span>
-        </button>
-        {showSEOAnalysis && (
-          <div className="mt-4 space-y-6">
-            {/* Keyword Implementation */}
-            <div>
-              <h4 className="text-sm font-medium text-gray-900">
-                Keyword Implementation
-              </h4>
-              <div className="mt-2 overflow-x-auto">
-                <table className="min-w-full divide-y divide-gray-200">
-                  <thead>
-                    <tr>
-                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Keyword
-                      </th>
-                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Actual
-                      </th>
-                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Recommended
-                      </th>
-                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Placement
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-200">
-                    {Object.entries(
-                      content.seoAnalysis.keywordImplementation
-                    ).map(([keyword, data]) => (
-                      <tr key={keyword}>
-                        <td className="px-4 py-2 text-sm text-gray-900">
-                          {keyword}
-                        </td>
-                        <td className="px-4 py-2 text-sm text-gray-500">
-                          {data.actual}
-                        </td>
-                        <td className="px-4 py-2 text-sm text-gray-500">
-                          {data.recommended}
-                        </td>
-                        <td className="px-4 py-2 text-sm text-gray-500">
-                          {data.placement.join(", ")}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-
-            {/* Content Gaps */}
-            <div>
-              <h4 className="text-sm font-medium text-gray-900">
-                Content Gaps Covered
-              </h4>
-              <ul className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
-                {content.seoAnalysis.contentGapsCovered.map((gap) => (
-                  <li
-                    key={gap}
-                    className="flex items-center text-sm text-gray-600"
-                  >
-                    <svg
-                      className="h-5 w-5 text-green-500 mr-2"
-                      viewBox="0 0 20 20"
-                      fill="currentColor"
-                    >
-                      <path
-                        fillRule="evenodd"
-                        d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
-                        clipRule="evenodd"
-                      />
-                    </svg>
-                    {gap}
-                  </li>
-                ))}
-              </ul>
-            </div>
-
-            {/* Missing Topics */}
-            {content.seoAnalysis.missingTopics.length > 0 && (
-              <div>
-                <h4 className="text-sm font-medium text-gray-900">
-                  Missing Topics
-                </h4>
-                <ul className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
-                  {content.seoAnalysis.missingTopics.map((topic) => (
-                    <li
-                      key={topic}
-                      className="flex items-center text-sm text-gray-600"
-                    >
-                      <svg
-                        className="h-5 w-5 text-yellow-500 mr-2"
-                        viewBox="0 0 20 20"
-                        fill="currentColor"
-                      >
-                        <path
-                          fillRule="evenodd"
-                          d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z"
-                          clipRule="evenodd"
-                        />
-                      </svg>
-                      {topic}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-
-            {/* Suggestions */}
-            {content.seoAnalysis.suggestions.length > 0 && (
-              <div>
-                <h4 className="text-sm font-medium text-gray-900">
-                  Improvement Suggestions
-                </h4>
-                <ul className="mt-2 space-y-2">
-                  {content.seoAnalysis.suggestions.map((suggestion, index) => (
-                    <li
-                      key={index}
-                      className="flex items-start text-sm text-gray-600"
-                    >
-                      <svg
-                        className="h-5 w-5 text-blue-500 mr-2 mt-0.5"
-                        viewBox="0 0 20 20"
-                        fill="currentColor"
-                      >
-                        <path
-                          fillRule="evenodd"
-                          d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z"
-                          clipRule="evenodd"
-                        />
-                      </svg>
-                      {suggestion}
-                    </li>
-                  ))}
-                </ul>
-              </div>
             )}
           </div>
-        )}
+        </div>
       </div>
     </div>
   );

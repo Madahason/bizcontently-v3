@@ -1,231 +1,136 @@
 import { NextResponse } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
+import { generateContentPrompt } from "@/lib/blog-flow/prompts/contentPrompts";
 import {
   BlogContentGenerationParams,
   BlogContentGenerationResponse,
   BlogContentSection,
 } from "@/lib/blog-flow/types/generation";
-import { generateContentPrompt } from "@/lib/blog-flow/prompts/contentPrompts";
+import {
+  findRelevantLinks,
+  insertLinks,
+  formatSectionWithLinks,
+} from "@/lib/blog-flow/utils/textAnalysis";
 
-// Create Anthropic client
 const anthropic = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY!,
+  apiKey: process.env.ANTHROPIC_API_KEY,
 });
 
-// Helper function to validate content section
-function validateContentSection(section: any): {
-  isValid: boolean;
-  errors: string[];
-} {
-  const errors: string[] = [];
-
-  if (!section.id || typeof section.id !== "string") {
-    errors.push("Missing or invalid section ID");
-  }
-  if (!section.content || typeof section.content !== "string") {
-    errors.push("Missing or invalid content");
-  }
-  if (typeof section.wordCount !== "number") {
-    errors.push("Missing or invalid word count");
-  }
-  if (!section.keywordDensity || typeof section.keywordDensity !== "object") {
-    errors.push("Missing or invalid keyword density");
-  }
-  if (typeof section.readabilityScore !== "number") {
-    errors.push("Missing or invalid readability score");
-  }
-
-  return {
-    isValid: errors.length === 0,
-    errors,
-  };
-}
-
-// Helper function to validate content response
-function validateContent(content: any): { isValid: boolean; errors: string[] } {
-  const errors: string[] = [];
-
-  try {
-    // Validate sections
-    if (!Array.isArray(content.sections)) {
-      errors.push("Sections must be an array");
-    } else {
-      content.sections.forEach((section: any, index: number) => {
-        const sectionValidation = validateContentSection(section);
-        if (!sectionValidation.isValid) {
-          errors.push(
-            `Section ${index} errors: ${sectionValidation.errors.join(", ")}`
-          );
-        }
-      });
-    }
-
-    // Validate metadata
-    if (!content.metadata || typeof content.metadata !== "object") {
-      errors.push("Missing or invalid metadata");
-    } else {
-      const metadata = content.metadata;
-      if (typeof metadata.totalWordCount !== "number") {
-        errors.push("Missing or invalid total word count");
-      }
-      if (typeof metadata.averageReadabilityScore !== "number") {
-        errors.push("Missing or invalid average readability score");
-      }
-      if (
-        !metadata.keywordDensityOverall ||
-        typeof metadata.keywordDensityOverall !== "object"
-      ) {
-        errors.push("Missing or invalid overall keyword density");
-      }
-      if (typeof metadata.seoScore !== "number") {
-        errors.push("Missing or invalid SEO score");
-      }
-      if (
-        !metadata.contentQualityMetrics ||
-        typeof metadata.contentQualityMetrics !== "object"
-      ) {
-        errors.push("Missing or invalid content quality metrics");
-      }
-    }
-
-    // Validate SEO analysis
-    if (!content.seoAnalysis || typeof content.seoAnalysis !== "object") {
-      errors.push("Missing or invalid SEO analysis");
-    } else {
-      const seoAnalysis = content.seoAnalysis;
-      if (
-        !seoAnalysis.keywordImplementation ||
-        typeof seoAnalysis.keywordImplementation !== "object"
-      ) {
-        errors.push("Missing or invalid keyword implementation");
-      }
-      if (!Array.isArray(seoAnalysis.contentGapsCovered)) {
-        errors.push("Content gaps covered must be an array");
-      }
-      if (!Array.isArray(seoAnalysis.missingTopics)) {
-        errors.push("Missing topics must be an array");
-      }
-      if (!Array.isArray(seoAnalysis.suggestions)) {
-        errors.push("Suggestions must be an array");
-      }
-    }
-  } catch (error) {
-    errors.push(
-      `Validation error: ${
-        error instanceof Error ? error.message : "Unknown error"
-      }`
-    );
-  }
-
-  return {
-    isValid: errors.length === 0,
-    errors,
-  };
-}
+export const runtime = "edge";
 
 export async function POST(req: Request) {
   try {
     const params: BlogContentGenerationParams = await req.json();
 
-    if (!params.outline) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: "Outline is required",
-        },
-        { status: 400 }
-      );
+    // Validate input parameters
+    if (
+      !params.outline ||
+      !params.outline.sections ||
+      !Array.isArray(params.outline.sections)
+    ) {
+      throw new Error("Invalid outline structure provided");
     }
 
+    const prompt = generateContentPrompt(params);
+
+    const response = await anthropic.messages.create({
+      model: "claude-3-opus-20240229",
+      max_tokens: 4000,
+      temperature: 0.7,
+      messages: [
+        {
+          role: "user",
+          content: prompt,
+        },
+      ],
+    });
+
+    // Extract the content from the first message block
+    const content = response.content.find(
+      (block) => block.type === "text"
+    )?.text;
+
+    if (!content) {
+      throw new Error("No content received from Anthropic");
+    }
+
+    // Try to parse the content as JSON, removing any potential non-JSON text
+    const jsonContent = content.substring(
+      content.indexOf("{"),
+      content.lastIndexOf("}") + 1
+    );
+
+    let parsedContent: BlogContentGenerationResponse;
     try {
-      // Generate the prompt
-      const prompt = generateContentPrompt(params);
-
-      // Create the completion
-      const response = await anthropic.messages.create({
-        model: "claude-3-opus-20240229",
-        max_tokens: params.maxTokens || 4000,
-        temperature: 0.7,
-        system: `You are an expert content writer and SEO specialist.
-You must ONLY respond with a valid JSON object.
-Do not include any other text, explanations, or markdown formatting.
-The JSON structure must exactly match the example provided.
-Each field must have the correct type as specified.
-Never include any text before or after the JSON object.
-Generate high-quality, engaging content that:
-- Follows the outline structure exactly
-- Implements SEO guidelines naturally
-- Maintains consistent style and tone
-- Includes proper markdown formatting`,
-        messages: [
-          {
-            role: "user",
-            content: prompt,
-          },
-        ],
-      });
-
-      // Get the content from the response
-      const content = response.content.find((block) => block.type === "text");
-      if (!content || content.type !== "text") {
-        throw new Error("No text content in response");
-      }
-
-      try {
-        // Parse and validate the response
-        const parsed = JSON.parse(content.text);
-        const validation = validateContent(parsed);
-
-        if (!validation.isValid) {
-          console.error("Content validation errors:", validation.errors);
-          return NextResponse.json(
-            {
-              success: false,
-              error: "Invalid content structure",
-              validationErrors: validation.errors,
-            },
-            { status: 422 }
-          );
-        }
-
-        // Return the validated content
-        return NextResponse.json({
-          success: true,
-          content: parsed,
-        });
-      } catch (parseError) {
-        console.error("Failed to parse content:", parseError);
-        return NextResponse.json(
-          {
-            success: false,
-            error: "Failed to parse generated content",
-            parseError:
-              parseError instanceof Error
-                ? parseError.message
-                : "Unknown error",
-          },
-          { status: 422 }
-        );
-      }
-    } catch (error) {
-      console.error("Content generation error:", error);
-      return NextResponse.json(
-        {
-          success: false,
-          error: "Error generating content",
-          details: error instanceof Error ? error.message : "Unknown error",
-        },
-        { status: 500 }
-      );
+      parsedContent = JSON.parse(jsonContent);
+    } catch (parseError) {
+      console.error("Failed to parse content as JSON:", parseError);
+      console.error("Raw content:", content);
+      throw new Error("Invalid JSON response from Anthropic");
     }
-  } catch (error) {
-    console.error("Request processing error:", error);
-    return NextResponse.json(
-      {
-        success: false,
-        error: "Failed to process content generation request",
+
+    // Validate the parsed content has the required structure
+    if (!parsedContent.sections || !Array.isArray(parsedContent.sections)) {
+      console.error("Invalid content structure:", parsedContent);
+      throw new Error("Invalid content structure: missing sections array");
+    }
+
+    // Process sections to add headings and external links
+    const enhancedSections = await Promise.all(
+      parsedContent.sections.map(async (section, index) => {
+        try {
+          if (!section.content || typeof section.content !== "string") {
+            throw new Error(`Invalid section content for section ${index}`);
+          }
+
+          // Format content with proper heading and add relevant links
+          const formattedContent = await formatSectionWithLinks(
+            section,
+            index === 0 ? 1 : 2 // First section is h1, rest are h2
+          );
+
+          return {
+            ...section,
+            content: formattedContent,
+          };
+        } catch (error) {
+          console.error(`Error processing section ${section.id}:`, error);
+          // Return the original section if enhancement fails
+          return section;
+        }
+      })
+    );
+
+    const enhancedContent = {
+      ...parsedContent,
+      sections: enhancedSections,
+    };
+
+    return new NextResponse(JSON.stringify(enhancedContent), {
+      headers: {
+        "Content-Type": "application/json",
       },
-      { status: 500 }
+    });
+  } catch (error) {
+    console.error("[CONTENT_ERROR]", error);
+    // Include more detailed error information in development
+    const errorMessage =
+      process.env.NODE_ENV === "development"
+        ? error instanceof Error
+          ? `${error.message}\n${error.stack}`
+          : "Failed to generate content"
+        : "Failed to generate content";
+
+    return new NextResponse(
+      JSON.stringify({
+        error: errorMessage,
+      }),
+      {
+        status: 500,
+        headers: {
+          "Content-Type": "application/json",
+        },
+      }
     );
   }
 }

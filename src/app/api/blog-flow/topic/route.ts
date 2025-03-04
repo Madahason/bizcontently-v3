@@ -121,13 +121,70 @@ Never generate off-topic or tangentially related content.`,
 
         if (!parsed.topics || !Array.isArray(parsed.topics)) {
           console.error("Invalid response format:", content.text);
-          throw new Error("Invalid response format");
+          throw new Error(
+            "Invalid response format: missing or invalid topics array"
+          );
+        }
+
+        // Validate each topic has required fields
+        const validateTopic = (topic: any): topic is TopicIdea => {
+          return (
+            typeof topic === "object" &&
+            typeof topic.title === "string" &&
+            typeof topic.description === "string" &&
+            Array.isArray(topic.targetKeywords) &&
+            typeof topic.estimatedWordCount === "number" &&
+            typeof topic.difficulty === "string" &&
+            typeof topic.competitorInsights === "object" &&
+            typeof topic.competitorInsights.averageWordCount === "number" &&
+            Array.isArray(topic.competitorInsights.commonSubtopics) &&
+            Array.isArray(topic.competitorInsights.keywordGaps)
+          );
+        };
+
+        const validationResults = parsed.topics.map((topic: any) => {
+          try {
+            if (!validateTopic(topic)) {
+              return {
+                valid: false,
+                error: "Missing required fields or invalid field types",
+                topic,
+              };
+            }
+            return { valid: true, topic };
+          } catch (e) {
+            return {
+              valid: false,
+              error: e instanceof Error ? e.message : "Invalid topic format",
+              topic,
+            };
+          }
+        });
+
+        interface ValidationResult {
+          valid: boolean;
+          error?: string;
+          topic: any;
+        }
+
+        const invalidTopics = validationResults.filter(
+          (result: ValidationResult) => !result.valid
+        );
+        if (invalidTopics.length > 0) {
+          console.error("Invalid topics found:", invalidTopics);
+          throw new Error(
+            `Invalid topic format: ${invalidTopics
+              .map((t: ValidationResult) => t.error)
+              .join(", ")}`
+          );
         }
 
         // Filter out any topics that don't meet relevance criteria
-        let validTopics = parsed.topics.filter((topic: TopicIdea) =>
-          validateTopicRelevance(topic, params.mainTopic)
-        );
+        let validTopics = validationResults
+          .map((result: ValidationResult) => result.topic)
+          .filter((topic: TopicIdea) =>
+            validateTopicRelevance(topic, params.mainTopic)
+          );
 
         console.log(
           `Generated ${parsed.topics.length} topics, ${validTopics.length} valid`
